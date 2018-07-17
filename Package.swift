@@ -17,7 +17,7 @@ let package = Package(
 		.package(url: "https://github.com/PerfectlySoft/Perfect-HTTPServer", from: "3.0.0"),
 		.package(url: "https://github.com/PerfectlySoft/Perfect-CloudFormation.git", from: "0.0.0"),
 		.package(url: "https://github.com/PerfectlySoft/Perfect-Redis.git", from: "3.2.0"),
-		.package(url: "https://github.com/kjessup/BiqSwiftCodables.git", .branch("master"))
+		.package(url: "https://github.com/ubiqweus/qBiqSwiftCodables.git", .branch("master"))
 	],
 	targets: [
 		.target(name: "BiqCollectorLib",
