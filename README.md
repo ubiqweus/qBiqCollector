@@ -1,0 +1,2 @@
+# qBiqCollector
+Collects qBiq reports
