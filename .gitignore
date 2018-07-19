@@ -71,3 +71,5 @@ Package.swift.orig
 .DS_Store
 Package.resolved
 webroot/*.bin
+webroot/QESP*
+webroot/QMCU*
