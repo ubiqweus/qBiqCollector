@@ -1,0 +1,14 @@
+psql:
+  image: postgres
+  restart: always
+  ports: 
+      - "5432:5432"
+  environment:
+    - "POSTGRES_USER=postgres"
+    - "POSTGRES_PASSWORD="
+    - "PGDATA=./db"
+redis:
+  image: redis
+  restart: always
+  ports:
+    - "6379:6379"

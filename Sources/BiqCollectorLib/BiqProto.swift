@@ -9,8 +9,11 @@ import PerfectNet
 import Dispatch
 import PerfectCrypto
 import PerfectCRUD
+import Foundation
 
 public let biqProtoVersion: UInt8 = 1
+public let biqProtoVersion2: UInt8 = 2
+
 let biqProtoReadTimeout = 60.0
 let commaByte: UInt8 = 0x2c
 
@@ -264,6 +267,79 @@ extension BiqResponseValue: BytesProvider {
 	}
 }
 
+
+extension String {
+  public func hexAsUInt32() -> UInt32 {
+    let scanner = Scanner(string: self)
+    var value: UInt32 = 0
+    scanner.scanHexInt32(&value)
+    return value
+  }
+  public func hexAsInt16() -> Int16 {
+    var v = self.hexAsUInt32()
+    var x: Int16 = 0
+    memcpy(&x, &v, MemoryLayout<Int16>.size)
+    return x
+  }
+  public func hexAsInt() -> Int {
+    var v = self.hexAsUInt32()
+    var x: Int32 = 0
+    memcpy(&x, &v, MemoryLayout<Int32>.size)
+    return Int(x)
+  }
+}
+
+public struct BiqReportV2: Codable, Equatable {
+  public let bixid: String
+  public let timestamp: time_t
+  public let charging: Int
+  public let fwVersion: String
+  public let wifiVersion: String
+  public let battery:Int
+  public let temperature: Double
+  public let rhtemp: Double
+  public let humidity: Int
+  public let light: Int
+  public let movement: Int
+  public let accelx: Int
+  public let accely: Int
+  public let accelz: Int
+}
+
+public struct BiqRecordV2 : Codable {
+  public let bid: String
+  public let rec: String
+  public let clk: String
+  public let chg: String
+  public let efm: String
+  public let esp: String
+  public let bat: String
+  public let tmp: String
+  public let rht: String
+  public let hum: String
+  public let lgt: String
+  public let mov: String
+  public let acx: String
+  public let acy: String
+  public let acz: String
+
+  public var report: BiqReportV2 {
+    let now = time(nil)
+    let clock = clk.hexAsUInt32()
+    let moment = rec.hexAsUInt32()
+    let timestamp = now - time_t(clock - moment)
+
+    return BiqReportV2.init(
+      bixid: bid, timestamp: timestamp, charging: chg.hexAsInt(),
+      fwVersion: efm, wifiVersion: esp, battery: bat.hexAsInt(),
+      temperature: Double(tmp.hexAsInt16()) / 10.0,
+      rhtemp: Double(rht.hexAsInt16()) / 10.0,
+      humidity: hum.hexAsInt(),
+      light: lgt.hexAsInt(), movement: mov.hexAsInt(),
+      accelx: acx.hexAsInt(), accely: acy.hexAsInt(), accelz: acz.hexAsInt())
+  }
+}
+
 public struct BiqReport {
 	public let version: UInt8
 	public let status: UInt8
@@ -389,7 +465,7 @@ extension BiqResponse: Equatable {
 	}
 }
 
-public typealias BiqReportGetFunc = (() throws -> BiqReport)
+public typealias BiqReportGetFunc = (() throws -> Any)
 public typealias BiqResponseGetFunc = (() throws -> BiqResponse)
 public typealias BiqResponsePutFunc = (() throws -> ())
 public typealias BiqReportPutFunc = (() throws -> ())
@@ -515,7 +591,7 @@ public extension BiqProtoConnection {
 			let payloadLength = Int(UInt16(first: bytes[0], second: bytes[1])) - 4
 			let protocolVersion = bytes[2]
 			
-			guard protocolVersion == biqProtoVersion else {
+			guard [biqProtoVersion, biqProtoVersion2].contains(protocolVersion) else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unhandled protocol version \(protocolVersion).")}) }
 			}
 			
@@ -536,6 +612,13 @@ public extension BiqProtoConnection {
 			guard let bytes = bytes, bytes.count == payloadLength else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unable to read report payload.")}) }
 			}
+      if protocolVersion == biqProtoVersion2,
+        let jsonString = String.init(validatingUTF8: bytes),
+        let jsonData = jsonString.data(using: .utf8),
+        let record = try? JSONDecoder().decode(BiqRecordV2.self, from: jsonData) {
+          callback({ return record.report })
+          return
+      }
 			var byteGen = bytes.makeIterator()
 			guard let biqId = self.stringUntil(delimiter: commaByte, gen: &byteGen),
 				let fwVersion = self.stringUntil(delimiter: commaByte, gen: &byteGen),
