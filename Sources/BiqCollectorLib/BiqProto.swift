@@ -9,7 +9,6 @@ import PerfectNet
 import Dispatch
 import PerfectCrypto
 import PerfectCRUD
-import Foundation
 
 public let biqProtoVersion: UInt8 = 1
 public let biqProtoVersion2: UInt8 = 2
@@ -267,76 +266,53 @@ extension BiqResponseValue: BytesProvider {
 	}
 }
 
-
-extension String {
-  public func hexAsUInt32() -> UInt32 {
-    let scanner = Scanner(string: self)
-    var value: UInt32 = 0
-    scanner.scanHexInt32(&value)
-    return value
-  }
-  public func hexAsInt16() -> Int16 {
-    var v = self.hexAsUInt32()
-    var x: Int16 = 0
-    memcpy(&x, &v, MemoryLayout<Int16>.size)
-    return x
-  }
-  public func hexAsInt() -> Int {
-    var v = self.hexAsUInt32()
-    var x: Int32 = 0
-    memcpy(&x, &v, MemoryLayout<Int32>.size)
-    return Int(x)
-  }
-}
-
-public struct BiqReportV2: Codable, Equatable {
+public struct BiqReportV2 {
   public let bixid: String
-  public let timestamp: time_t
+  public let timestamp: Double
   public let charging: Int
   public let fwVersion: String
   public let wifiVersion: String
-  public let battery:Int
+  public let battery:Double
   public let temperature: Double
   public let rhtemp: Double
   public let humidity: Int
   public let light: Int
-  public let movement: Int
   public let accelx: Int
   public let accely: Int
   public let accelz: Int
-}
 
-public struct BiqRecordV2 : Codable {
-  public let bid: String
-  public let rec: String
-  public let clk: String
-  public let chg: String
-  public let efm: String
-  public let esp: String
-  public let bat: String
-  public let tmp: String
-  public let rht: String
-  public let hum: String
-  public let lgt: String
-  public let mov: String
-  public let acx: String
-  public let acy: String
-  public let acz: String
+  fileprivate typealias BiqRecordV2 = (rec: Int32, clk: Int32, bat: UInt16, tmp: Int16, rht: Int16, hum: UInt8, lum: UInt8, x: Int32, y: Int32, z: Int32)
 
-  public var report: BiqReportV2 {
-    let now = time(nil)
-    let clock = clk.hexAsUInt32()
-    let moment = rec.hexAsUInt32()
-    let timestamp = now - time_t(clock - moment)
-
-    return BiqReportV2.init(
-      bixid: bid, timestamp: timestamp, charging: chg.hexAsInt(),
-      fwVersion: efm, wifiVersion: esp, battery: bat.hexAsInt(),
-      temperature: Double(tmp.hexAsInt16()) / 10.0,
-      rhtemp: Double(rht.hexAsInt16()) / 10.0,
-      humidity: hum.hexAsInt(),
-      light: lgt.hexAsInt(), movement: mov.hexAsInt(),
-      accelx: acx.hexAsInt(), accely: acy.hexAsInt(), accelz: acz.hexAsInt())
+  //let incoming = "K0121-1001-2SHARK,QMCU_B2.Y0.44,QESP_D1.1.48,4QK9WxAEvVujAYj/hv8tF8QEAADT////+gUAAA=="
+  public init?(buffer: [UInt8], status: UInt8) {
+    guard let message = String.init(validatingUTF8: buffer) else { return nil }
+    let notes:[String] = message.split(separator: ",").map { String($0) }
+    guard notes.count == 4 else { return nil }
+    let base64encoded: [UInt8] = notes[0].utf8.map{ $0 }
+    bixid = notes[1]
+    fwVersion = notes[2]
+    wifiVersion = notes[3]
+    guard let decoded = base64encoded.decode(.base64) else { return nil }
+    var r: BiqRecordV2 = (Int32(0), Int32(0), UInt16(0), Int16(0), Int16(0), UInt8(0), UInt8(0), Int32(0), Int32(0), Int32(0))
+    let result = decoded.withUnsafeBufferPointer { buffered -> Bool in
+      guard let p = buffered.baseAddress else { return false }
+      memcpy(&r, p, MemoryLayout<BiqRecordV2>.size)
+      return true
+    }
+    guard result else { return nil }
+    let now = Int32(time(nil))
+    let then = r.clk
+    let tstamp = now - then
+    timestamp = Double(tstamp + r.rec) * 1000
+    charging = Int(status)
+    battery = Double(r.bat) / 100.0
+    temperature = Double(r.tmp) / 10.0
+    rhtemp = Double(r.rht) / 10.0
+    humidity = Int(r.hum)
+    light = Int(r.lum)
+    accelx = Int(r.x)
+    accely = Int(r.y)
+    accelz = Int(r.z)
   }
 }
 
@@ -613,10 +589,8 @@ public extension BiqProtoConnection {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unable to read report payload.")}) }
 			}
       if protocolVersion == biqProtoVersion2,
-        let jsonString = String.init(validatingUTF8: bytes),
-        let jsonData = jsonString.data(using: .utf8),
-        let record = try? JSONDecoder().decode(BiqRecordV2.self, from: jsonData) {
-          callback({ return record.report })
+        let report = BiqReportV2.init(buffer: bytes, status: statusFlags) {
+          callback({ return report })
           return
       }
 			var byteGen = bytes.makeIterator()
