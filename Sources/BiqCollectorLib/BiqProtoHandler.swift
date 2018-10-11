@@ -19,11 +19,11 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
         CRUDLogging.log(.info, "ReportV2 read: \(r)")
         shouldRespond = r.delegate
         obs.bixid = r.bixid
-        obs.obstime = Double(r.timestamp) * 1000.0
+        obs.obstime = r.timestamp
         obs.charging = r.charging
         obs.firmware = r.fwVersion
         obs.wifiFirmware = r.wifiVersion
-        obs.battery = Double(r.battery) / 100.0
+        obs.battery = r.battery
         obs.temp = r.temperature
         obs.light = r.light
         obs.humidity = r.humidity
