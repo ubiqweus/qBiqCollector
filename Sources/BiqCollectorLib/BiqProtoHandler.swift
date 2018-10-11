@@ -14,9 +14,10 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 		response in
 		do {
       var obs = BiqObs()
-
+      var shouldRespond = true
       if let r = try response() as? BiqReportV2 {
         CRUDLogging.log(.info, "ReportV2 read: \(r)")
+        shouldRespond = r.delegate
         obs.bixid = r.bixid
         obs.obstime = Double(r.timestamp) * 1000.0
         obs.charging = r.charging
@@ -73,7 +74,8 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 				CRUDLogging.log(.error, "Failure while saving obs data \(error). retryReportError")
 				response = BiqResponse(version: biqProtoVersion, status: retryReportError, values: [])
 			}
-			
+
+      guard shouldRespond else { return }
 			connection.writeResponse(response) {
 				response in
 				do {
