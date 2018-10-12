@@ -9,6 +9,9 @@ import PerfectNet
 import Dispatch
 import PerfectCrypto
 import PerfectCRUD
+#if os(Linux)
+import Glibc
+#endif
 
 public let biqProtoVersion: UInt8 = 1
 public let biqProtoVersion2: UInt8 = 2
@@ -317,13 +320,9 @@ public struct BiqReportV2 {
     }
     let records = base64decoded.withUnsafeBytes { buffer -> [BiqRecordV2] in
       guard let pointer = buffer.baseAddress else { return [] }
-      let zero = (Int32(0), Int16(0), Int16(0), Int16(0), Int8(0), Int8(0), Int32(0), Int32(0), Int32(0))
-      var records = Array<BiqRecordV2>.init(repeating: zero, count: count)
-      records.withUnsafeMutableBytes { buffer in
-        guard let address = buffer.baseAddress else { return }
-        memcpy(address, pointer, base64decoded.count)
-      }
-      return records
+      let recordPointer = pointer.bindMemory(to: BiqRecordV2.self, capacity: count)
+      let address = UnsafeBufferPointer(start: recordPointer, count: count)
+      return Array(address)
     }
     guard records.count == count else {
       throw Exception.MemoryCopyFailure
