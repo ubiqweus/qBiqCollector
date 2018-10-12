@@ -11,6 +11,8 @@ import PerfectCrypto
 import PerfectCRUD
 
 public let biqProtoVersion: UInt8 = 1
+public let biqProtoVersion2: UInt8 = 2
+
 let biqProtoReadTimeout = 60.0
 let commaByte: UInt8 = 0x2c
 
@@ -264,6 +266,86 @@ extension BiqResponseValue: BytesProvider {
 	}
 }
 
+public struct BiqReportV2 {
+  // the first record in a callback array will delegate the response for alll
+  public var delegate = false
+  public let bixid: String
+  public let timestamp: Double
+  public let charging: Int
+  public let fwVersion: String
+  public let wifiVersion: String
+  public let battery:Double
+  public let temperature: Double
+  public let rhtemp: Double
+  public let humidity: Int
+  public let light: Int
+  public let accelx: Int
+  public let accely: Int
+  public let accelz: Int
+
+  public enum Exception: Error {
+    case InvalidEncoding
+    case InvalidFormat(expected: Int, actual: Int)
+    case InvalidBase64
+    case UnexpectedRecordCount(expected: Int, actual: Int)
+    case MemoryCopyFailure
+  }
+
+  fileprivate typealias BiqRecordV2 = (clk: Int32,
+    bat: Int16, tmp: Int16, rht: Int16, hum: Int8, lum: Int8,
+    x: Int32, y: Int32, z: Int32)
+
+  public static func parseReports(bytes: [UInt8]) throws -> [BiqReportV2] {
+    guard let payload = String.init(validatingUTF8: bytes) else {
+      throw Exception.InvalidEncoding
+    }
+    let notes:[String] = payload.split(separator: ",").map { String($0) }
+    guard notes.count == 6 else {
+      throw Exception.InvalidFormat(expected: 6, actual: notes.count)
+    }
+    let id = notes[0]
+    let efm = notes[1]
+    let esp = notes[2]
+    let count = Int(notes[3]) ?? 0
+    let ticks = Int(notes[4]) ?? 0
+    let base64encoded = notes[5]
+    guard let base64decoded = base64encoded.decode(.base64) else { throw Exception.InvalidBase64 }
+    let size = MemoryLayout<BiqRecordV2>.size
+    let actual = base64decoded.count / size
+    guard actual == count else {
+      throw Exception.UnexpectedRecordCount(expected: count, actual: actual)
+    }
+    let records = base64decoded.withUnsafeBytes { buffer -> [BiqRecordV2] in
+      guard let pointer = buffer.baseAddress else { return [] }
+      let zero = (Int32(0), Int16(0), Int16(0), Int16(0), Int8(0), Int8(0), Int32(0), Int32(0), Int32(0))
+      var records = Array<BiqRecordV2>.init(repeating: zero, count: count)
+      records.withUnsafeMutableBytes { buffer in
+        guard let address = buffer.baseAddress else { return }
+        memcpy(address, pointer, base64decoded.count)
+      }
+      return records
+    }
+    guard records.count == count else {
+      throw Exception.MemoryCopyFailure
+    }
+    let offset = Int(time(nil)) - ticks;
+    var reports: [BiqReportV2] = []
+    for i in 0 ..< count {
+      let r = records[i]
+      let q = BiqReportV2
+        .init(delegate: i == 0, bixid: id,
+              timestamp: Double(offset + Int(r.clk)) * 1000,
+              charging: r.bat < 0 ? 1 : 0,
+              fwVersion: efm, wifiVersion: esp, battery: Double(abs(r.bat)) / 100.0,
+              temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
+              humidity: Int(r.hum), light: Int(r.lum),
+              accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
+      reports.append(q)
+    }
+    return reports
+  }
+}
+
 public struct BiqReport {
 	public let version: UInt8
 	public let status: UInt8
@@ -389,7 +471,7 @@ extension BiqResponse: Equatable {
 	}
 }
 
-public typealias BiqReportGetFunc = (() throws -> BiqReport)
+public typealias BiqReportGetFunc = (() throws -> Any)
 public typealias BiqResponseGetFunc = (() throws -> BiqResponse)
 public typealias BiqResponsePutFunc = (() throws -> ())
 public typealias BiqReportPutFunc = (() throws -> ())
@@ -515,7 +597,7 @@ public extension BiqProtoConnection {
 			let payloadLength = Int(UInt16(first: bytes[0], second: bytes[1])) - 4
 			let protocolVersion = bytes[2]
 			
-			guard protocolVersion == biqProtoVersion else {
+			guard [biqProtoVersion, biqProtoVersion2].contains(protocolVersion) else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unhandled protocol version \(protocolVersion).")}) }
 			}
 			
@@ -536,6 +618,17 @@ public extension BiqProtoConnection {
 			guard let bytes = bytes, bytes.count == payloadLength else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unable to read report payload.")}) }
 			}
+      if protocolVersion == biqProtoVersion2 {
+          do {
+            let reports = try BiqReportV2.parseReports(bytes: bytes)
+            reports.forEach { report in
+              callback { return report }
+            }
+          } catch let err {
+            callback { throw err }
+          }
+          return
+      }
 			var byteGen = bytes.makeIterator()
 			guard let biqId = self.stringUntil(delimiter: commaByte, gen: &byteGen),
 				let fwVersion = self.stringUntil(delimiter: commaByte, gen: &byteGen),

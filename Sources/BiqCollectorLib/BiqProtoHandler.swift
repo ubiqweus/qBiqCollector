@@ -13,36 +13,57 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 	connection.readReport {
 		response in
 		do {
-			let report = try response()
-			CRUDLogging.log(.info, "Report read: \(report)")
-			var obs = BiqObs()
-			obs.obstime = Double.now
-			obs.bixid = report.biqId
-			obs.firmware = report.wifiVersion
-			obs.wifiFirmware = report.fwVersion
-			obs.charging = Int(report.status & reportStatusFlagCharging)
-			for reportValue in report.values {
-				switch reportValue {
-				case .temperatureOne(let temp):
-					if obs.temp == 0.0 {
-						obs.temp = Double(temp) / 10
-					}
-				case .photometric(let pho):
-					obs.light = Int(pho)
-				case .relativeHumidity(let rh):
-					obs.humidity = Int(rh)
-				case .temperatureTwo(let temp2):
-					obs.temp = Double(temp2) / 10
-				case .accelerometer(let accel):
-					let v = Int(accel)
-					obs.accelx = v
-					obs.accely = v
-					obs.accelz = v
-				case .batteryVoltage(let volts):
-					obs.battery = Double(volts) / 100
-				}
-			}
-			
+      var obs = BiqObs()
+      var shouldRespond = true
+      if let r = try response() as? BiqReportV2 {
+        CRUDLogging.log(.info, "ReportV2 read: \(r)")
+        shouldRespond = r.delegate
+        obs.bixid = r.bixid
+        obs.obstime = r.timestamp
+        obs.charging = r.charging
+        obs.firmware = r.fwVersion
+        obs.wifiFirmware = r.wifiVersion
+        obs.battery = r.battery
+        obs.temp = r.temperature
+        obs.light = r.light
+        obs.humidity = r.humidity
+        obs.accelx = r.accelx
+        obs.accely = r.accely
+        obs.accelz = r.accelz
+      }else if let report = try response() as? BiqReport {
+        CRUDLogging.log(.info, "Report read: \(report)")
+        obs.obstime = Double.now
+        obs.bixid = report.biqId
+        obs.firmware = report.wifiVersion
+        obs.wifiFirmware = report.fwVersion
+        obs.charging = Int(report.status & reportStatusFlagCharging)
+        for reportValue in report.values {
+          switch reportValue {
+          case .temperatureOne(let temp):
+            if obs.temp == 0.0 {
+              obs.temp = Double(temp) / 10
+            }
+          case .photometric(let pho):
+            obs.light = Int(pho)
+          case .relativeHumidity(let rh):
+            obs.humidity = Int(rh)
+          case .temperatureTwo(let temp2):
+            obs.temp = Double(temp2) / 10
+          case .accelerometer(let accel):
+            let v = Int(accel)
+            obs.accelx = v
+            obs.accely = v
+            obs.accelz = v
+          case .batteryVoltage(let volts):
+            obs.battery = Double(volts) / 100
+          }
+        }
+      } else {
+        CRUDLogging.log(.error, "Unable to read report")
+        return
+      }
+
+      print("obs:", obs)
 			let response: BiqResponse
 			do {
 				let status = noError
@@ -53,7 +74,8 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 				CRUDLogging.log(.error, "Failure while saving obs data \(error). retryReportError")
 				response = BiqResponse(version: biqProtoVersion, status: retryReportError, values: [])
 			}
-			
+
+      guard shouldRespond else { return }
 			connection.writeResponse(response) {
 				response in
 				do {
