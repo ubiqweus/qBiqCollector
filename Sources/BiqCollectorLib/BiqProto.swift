@@ -288,58 +288,49 @@ public struct BiqReportV2 {
 
   public enum Exception: Error {
     case InvalidEncoding
-    case InvalidFormat(expected: Int, actual: Int)
-    case InvalidBase64
-    case UnexpectedRecordCount(expected: Int, actual: Int)
-    case MemoryCopyFailure
   }
+
+  fileprivate typealias BiqRecordHeaderV2 = (clock: Int32, count: Int16, reserved: Int16)
 
   fileprivate typealias BiqRecordV2 = (clk: Int32,
     bat: Int16, tmp: Int16, rht: Int16, hum: Int8, lum: Int8,
     x: Int32, y: Int32, z: Int32)
 
   public static func parseReports(bytes: [UInt8]) throws -> [BiqReportV2] {
-    guard let payload = String.init(validatingUTF8: bytes) else {
+    let qreport = bytes.withUnsafeBytes {
+      bufferPointer -> (clock: Int, records: [BiqRecordV2], id: String, efm: String, esp: String)? in
+      guard let address = bufferPointer.baseAddress else { return nil }
+      let header = address.bindMemory(to: BiqRecordHeaderV2.self, capacity: 1).pointee
+      let clock = Int(header.clock)
+      let count = Int(header.count)
+      let dataPointer = address.advanced(by: MemoryLayout<BiqRecordHeaderV2>.size)
+      let stringPointer = dataPointer.advanced(by: MemoryLayout<BiqRecordV2>.size * count)
+      let string = String(cString: stringPointer.assumingMemoryBound(to: CChar.self))
+      let contents:[String] = string.split(separator: ",").map { String($0) }
+      guard count * MemoryLayout<BiqRecordV2>.size + MemoryLayout<BiqRecordHeaderV2>.size < bytes.count,
+        contents.count == 3 else { return nil }
+      let databuf = dataPointer.bindMemory(to: BiqRecordV2.self, capacity: count)
+      let data = UnsafeBufferPointer(start: databuf, count: count)
+      let records = Array(data)
+      return (clock: clock, records: records, id: contents[0], efm: contents[1], esp: contents[2])
+    }
+
+    guard let q = qreport else {
       throw Exception.InvalidEncoding
     }
-    let notes:[String] = payload.split(separator: ",").map { String($0) }
-    guard notes.count == 6 else {
-      throw Exception.InvalidFormat(expected: 6, actual: notes.count)
-    }
-    let id = notes[0]
-    let efm = notes[1]
-    let esp = notes[2]
-    let count = Int(notes[3]) ?? 0
-    let ticks = Int(notes[4]) ?? 0
-    let base64encoded = notes[5]
-    guard let base64decoded = base64encoded.decode(.base64) else { throw Exception.InvalidBase64 }
-    let size = MemoryLayout<BiqRecordV2>.size
-    let actual = base64decoded.count / size
-    guard actual == count else {
-      throw Exception.UnexpectedRecordCount(expected: count, actual: actual)
-    }
-    let records = base64decoded.withUnsafeBytes { buffer -> [BiqRecordV2] in
-      guard let pointer = buffer.baseAddress else { return [] }
-      let recordPointer = pointer.bindMemory(to: BiqRecordV2.self, capacity: count)
-      let address = UnsafeBufferPointer(start: recordPointer, count: count)
-      return Array(address)
-    }
-    guard records.count == count else {
-      throw Exception.MemoryCopyFailure
-    }
-    let offset = Int(time(nil)) - ticks;
+    let offset = Int(time(nil)) - q.clock;
     var reports: [BiqReportV2] = []
-    for i in 0 ..< count {
-      let r = records[i]
-      let q = BiqReportV2
-        .init(delegate: i == 0, bixid: id,
+    for i in 0 ..< q.records.count {
+      let r = q.records[i]
+      let item = BiqReportV2
+        .init(delegate: i == 0, bixid: q.id,
               timestamp: Double(offset + Int(r.clk)) * 1000,
               charging: r.bat < 0 ? 1 : 0,
-              fwVersion: efm, wifiVersion: esp, battery: Double(abs(r.bat)) / 100.0,
+              fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
               temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
               humidity: Int(r.hum), light: Int(r.lum),
               accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
-      reports.append(q)
+      reports.append(item)
     }
     return reports
   }
