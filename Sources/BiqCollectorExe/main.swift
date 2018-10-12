@@ -64,10 +64,9 @@ let staticFilePort = 80
 let testPort = 8080
 let webroot = "./webroot"
 #else
-let staticFilePort = 8081
+let staticFilePort = 80
 let testPort = 8080
-//let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
-let webroot = "./webroot"
+let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
 #endif
 
 // static file server for updates
