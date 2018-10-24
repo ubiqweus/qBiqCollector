@@ -146,6 +146,7 @@ public enum BiqResponseTag: UInt8 {
 	case humidityThreshold = 7
 	case ledColour = 8
 	
+	case deviceCapabilities = 9
 	case updateBootFW = 252
 	case updateAppFW = 254
 }
@@ -209,6 +210,12 @@ extension BiqResponseTag {
 					return nil
 			}
 			return .ledColour(r: one, g: two, b: three)
+        case .deviceCapabilities:
+            guard let low = gen.next(),
+                let high = gen.next() else {
+                    return nil
+            }
+            return .deviceCapabilities(low: low, high: high)
 		case .updateBootFW, .updateAppFW:
 			var bytes: [UInt8] = []
 			while let c = gen.next() {
@@ -238,6 +245,7 @@ public enum BiqResponseValue {
 	case lightThreshold(low: UInt8, high: UInt8)
 	case humidityThreshold(low: UInt8, high: UInt8)
 	case ledColour(r: UInt8, g: UInt8, b: UInt8)
+    case deviceCapabilities(low: UInt8, high: UInt8)
 	case updateBootFW(String)
 	case updateAppFW(String)
 }
@@ -261,6 +269,8 @@ extension BiqResponseValue: BytesProvider {
 			return [BiqResponseTag.humidityThreshold.rawValue, low, high]
 		case .ledColour(let r, let g, let b):
 			return [BiqResponseTag.ledColour.rawValue, r, g, b]
+        case .deviceCapabilities(let low, let high):
+            return [BiqResponseTag.deviceCapabilities.rawValue, low, high]
 		case .updateBootFW(_):
 			return [BiqResponseTag.updateBootFW.rawValue] + [1]//Array(url.utf8) + [0]
 		case .updateAppFW(_):
@@ -319,18 +329,21 @@ public struct BiqReportV2 {
       throw Exception.InvalidEncoding
     }
     let offset = Int(time(nil)) - q.clock;
-    var reports: [BiqReportV2] = []
-    for i in 0 ..< q.records.count {
-      let r = q.records[i]
-      let item = BiqReportV2
-        .init(delegate: i == 0, bixid: q.id,
-              timestamp: Double(offset + Int(r.clk)) * 1000,
-              charging: r.bat < 0 ? 1 : 0,
-              fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
-              temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
-              humidity: Int(r.hum), light: Int(r.lum),
-              accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
-      reports.append(item)
+    var reports: [BiqReportV2] = q.records.map { r -> BiqReportV2 in
+        BiqReportV2
+            .init(delegate: false, bixid: q.id,
+                  timestamp: Double(offset + Int(r.clk)) * 1000,
+                  charging: r.bat < 0 ? 1 : 0,
+                  fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
+                  temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
+                  humidity: Int(r.hum), light: Int(r.lum),
+                  accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
+    }
+    if q.records.isEmpty {
+        // make a "null" record for command forwarding
+        reports.append(BiqReportV2.init(delegate: true, bixid: q.id, timestamp: 0, charging: 0, fwVersion: q.efm, wifiVersion: q.esp, battery: 0, temperature: 0, rhtemp: 0, humidity: 0, light: 0, accelx: 0, accely: 0, accelz: 0))
+    } else {
+        reports[0].delegate = true
     }
     return reports
   }
@@ -449,6 +462,8 @@ extension BiqResponse: Equatable {
 				continue
 			case (.ledColour(let aa, let ab, let ac), .ledColour(let ba, let bb, let bc)) where aa == ba && ab == bb && ac == bc:
 				continue
+            case (.deviceCapabilities(let aa, let ab), .deviceCapabilities(let ba, let bb)) where aa == ba && ab == bb:
+                continue
 			case (.updateBootFW(let a), .updateBootFW(let b)) where a == b:
 				continue
 			case (.updateAppFW(let a), .updateAppFW(let b)) where a == b:

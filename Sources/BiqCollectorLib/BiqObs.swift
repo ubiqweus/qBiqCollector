@@ -73,7 +73,7 @@ extension BiqObs {
 		]
 	}
 	
-	func save() throws -> [BiqResponseValue] {
+	func save(_ delegate: Bool = true) throws -> [BiqResponseValue] {
 		guard let dbInfo = BiqObs.databaseInfo else {
 			throw PostgresCRUDError("Database info not set.")
 		}
@@ -83,7 +83,16 @@ extension BiqObs {
 								 port: dbInfo.hostPort,
 								 username: dbInfo.userName,
 								 password: dbInfo.password))
-		try db.table(BiqObs.self).insert(self)
+        
+        // for null record, just skip it for command forwarding purposes.
+        if abs(obstime) > 1e-6 {
+            try db.table(BiqObs.self).insert(self)
+        }
+        
+        // in a batch mode, only the last record should trigger the return codes
+        guard delegate else {
+            return []
+        }
 		// gather push limits
 		let pushLimits: [BiqDevicePushLimit] = try db.transaction {
 			let table = db.table(BiqDevicePushLimit.self)
@@ -126,6 +135,21 @@ extension BiqObs {
 			}
 		}
 		
+        let db2 = try Database<PostgresDatabaseConfiguration>(
+            configuration: .init(database: "qbiq_devices2",
+                                 host: dbInfo.hostName,
+                                 port: dbInfo.hostPort,
+                                 username: dbInfo.userName,
+                                 password: dbInfo.password))
+        if let deviceType = (try db2.transaction { () -> Int? in
+            let table = db2.table(BiqDevice.self)
+            let whereClause = table.where(\BiqDevice.id == bixid)
+            let all = try whereClause.select().map { $0.flags ?? 0 }
+            return all.first
+            }) {
+            let dev = UInt16(deviceType)
+            values.append(.deviceCapabilities(low: UInt8(dev), high: UInt8(dev >> 8)))
+        }
 		if let tempHigh = tempHigh, let tempLow = tempLow {
 			values.append(contentsOf: [.temperatureThreshold(low: Int16(tempLow * 10), high: Int16(tempHigh * 10))])
 		}
@@ -148,8 +172,8 @@ extension BiqObs {
 	}
 	
 	func reportSave() {
-		guard let sink = BiqObs.reportSink else {
-			return CRUDLogging.log(.info, "Redis info not set.")
+		guard abs(obstime) > 1e-6, let sink = BiqObs.reportSink else {
+			return CRUDLogging.log(.info, "Redis info not set or command record.")
 		}
 		do {
 			let dataDict = asDataDict()

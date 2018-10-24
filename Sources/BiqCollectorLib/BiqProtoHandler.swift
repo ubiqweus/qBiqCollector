@@ -67,7 +67,9 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 			let response: BiqResponse
 			do {
 				let status = noError
-				let responseValues = try obs.save()
+				let responseValues = try obs.save(shouldRespond)
+                // in batch mode, only the last record should broadcast
+                guard shouldRespond else { return }
 				DispatchQueue.global().async { obs.reportSave() }
 				response = BiqResponse(version: biqProtoVersion, status: status, values: responseValues)
 			} catch {
@@ -75,7 +77,6 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 				response = BiqResponse(version: biqProtoVersion, status: retryReportError, values: [])
 			}
 
-      guard shouldRespond else { return }
 			connection.writeResponse(response) {
 				response in
 				do {
