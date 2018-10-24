@@ -21,12 +21,12 @@ public extension BiqDeviceFirmware {
 			.first() else {
 			return nil // not in database - can not be upgraded
 		}
-		return next.obsoletedBy
+		return next.obsoletedBy?.trimmingCharacters(in: CharacterSet.init(charactersIn: "\t\r\n "))
 	}
 	public static func latest(of type: FWType, _ db: DB) throws -> String? {
 		guard let next = try db.table(BiqDeviceFirmware.self)
 			.order(descending: \BiqDeviceFirmware.version)
-			.where(\BiqDeviceFirmware.obsoletedBy == nil)
+			.where(\BiqDeviceFirmware.obsoletedBy == nil && \BiqDeviceFirmware.type == type.rawValue)
 			.first() else {
 				return nil // not in database - can not be upgraded
 		}
