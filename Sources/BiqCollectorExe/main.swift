@@ -30,6 +30,14 @@ import PerfectRedis
 import PerfectCRUD
 import SwiftCodables
 
+extension String {
+  func env(_ defaultValue: String = "" ) -> String {
+    let val = String.init(cString: getenv(self))
+    guard !val.isEmpty else { return defaultValue }
+    return val
+  }
+}
+
 let biqDatabaseInfo: CloudFormation.RDSInstance = {
 	if let pgsql = CloudFormation.listRDSInstances(type: .postgres)
 		.sorted(by: { $0.resourceName < $1.resourceName }).first {
@@ -38,10 +46,10 @@ let biqDatabaseInfo: CloudFormation.RDSInstance = {
 	return .init(resourceType: .postgres,
 				 resourceId: "",
 				 resourceName: "",
-				 userName: "postgres",
-				 password: "",
-				 hostName: "localhost",
-				 hostPort: 5432)
+				 userName: "BIQ_PG_USER".env("postgres"),
+				 password: "BIQ_PG_PASS".env(""),
+				 hostName: "BIQ_PG_HOST".env("localhost"),
+				 hostPort: Int("BIQ_PG_PORT".env("5432")) ?? 5432 )
 }()
 
 let biqRedisInfo: CloudFormation.ElastiCacheInstance = {
@@ -52,8 +60,8 @@ let biqRedisInfo: CloudFormation.ElastiCacheInstance = {
 	return .init(resourceType: .redis,
 				 resourceId: "",
 				 resourceName: "",
-				 hostName: "localhost",
-				 hostPort: 6379)
+				 hostName: "BIQ_RD_HOST".env("localhost"),
+				 hostPort: Int("BIQ_RD_PORT".env("6379")) ?? 6379)
 }()
 CRUDLogging.queryLogDestinations = []
 BiqObs.reportSink = biqRedisInfo
