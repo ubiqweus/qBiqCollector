@@ -32,9 +32,8 @@ import SwiftCodables
 
 extension String {
   func env(_ defaultValue: String = "" ) -> String {
-    let val = String.init(cString: getenv(self))
-    guard !val.isEmpty else { return defaultValue }
-    return val
+    guard let pval = getenv(self) else { return defaultValue }
+    return String.init(cString: pval)
   }
 }
 
