@@ -67,13 +67,14 @@ BiqObs.reportSink = biqRedisInfo
 BiqObs.databaseInfo = biqDatabaseInfo
 
 #if os(Linux)
-let staticFilePort = 80
+let staticFilePort = 443
 let testPort = 8080
 let webroot = "./webroot"
 #else
 let staticFilePort = 80
 let testPort = 8080
-let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
+//let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
+let webroot = "/Users/rockywei/qbiq/release"
 #endif
 
 // static file server for updates
@@ -139,7 +140,10 @@ do {
 	var r = Routes()
 	r.add(method: .get, uri: "/**", handler: fileServe)
 	r.add(method: .head, uri: "/**", handler: fileServe)
-	try HTTPServer.launch(wait: false, name: "qbiq static files", port: staticFilePort, routes: r)
+  try HTTPServer.launch(wait: false,
+                        .secureServer(TLSConfiguration(certPath: "QBIQ_SV_CERT".env(),
+                                                       keyPath: "QBIQ_SV_KEYP".env()),
+                        name: "qbiq static files", port: staticFilePort, routes: r))
 } catch {
 	CRUDLogging.log(.error, "Unable to start static file server: \(error)")
 }
