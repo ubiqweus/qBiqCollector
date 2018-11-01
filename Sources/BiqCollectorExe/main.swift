@@ -32,8 +32,13 @@ import SwiftCodables
 
 extension String {
   func env(_ defaultValue: String = "" ) -> String {
-    guard let pval = getenv(self) else { return defaultValue }
-    return String.init(cString: pval)
+    guard let pval = getenv(self) else { 
+	    print("loading env ", self, " = ", defaultValue)
+		return defaultValue 
+	}
+    let val = String.init(cString: pval)
+    print("loading env ", self, " = ", val)
+    return val
   }
 }
 
@@ -76,6 +81,9 @@ let testPort = 8080
 //let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
 let webroot = "/Users/rockywei/qbiq/release"
 #endif
+
+let cert = "BIQ_SV_CERT".env("/etc/cert/combo.crt")
+let keyp = "BIQ_SV_KEYP".env("/etc/cert/harvest.key")
 
 // static file server for updates
 do {
@@ -140,9 +148,8 @@ do {
 	var r = Routes()
 	r.add(method: .get, uri: "/**", handler: fileServe)
 	r.add(method: .head, uri: "/**", handler: fileServe)
-  try HTTPServer.launch(wait: false,
-                        .secureServer(TLSConfiguration(certPath: "QBIQ_SV_CERT".env(),
-                                                       keyPath: "QBIQ_SV_KEYP".env()),
+  	try HTTPServer.launch(wait: false,
+                        .secureServer(TLSConfiguration(certPath: cert, keyPath: keyp),
                         name: "qbiq static files", port: staticFilePort, routes: r))
 } catch {
 	CRUDLogging.log(.error, "Unable to start static file server: \(error)")
