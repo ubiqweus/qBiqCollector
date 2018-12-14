@@ -105,6 +105,7 @@ extension BiqObs {
 		}
 		var tempHigh: Float?
 		var tempLow: Float?
+    var sampleRate: UInt8?
 		// convert into response values
 		var values: [BiqResponseValue] = pushLimits.compactMap {
 			limit in
@@ -130,6 +131,11 @@ extension BiqObs {
 			case BiqDeviceLimitType.interval.rawValue:
 				let interval = UInt16(limit.limitValue)
 				return .reportInterval(interval)
+      case BiqDeviceLimitType.reportBufferCapacity.rawValue:
+        sampleRate = UInt8(limit.limitValue)
+        return nil
+      case BiqDeviceLimitType.reportFormat.rawValue:
+        return .reportFormat(1)
 			default:
 				return nil
 			}
@@ -146,9 +152,11 @@ extension BiqObs {
             let whereClause = table.where(\BiqDevice.id == bixid)
             let all = try whereClause.select().map { $0.flags ?? 0 }
             return all.first
-            }) {
-            let dev = UInt16(deviceType)
-            values.append(.deviceCapabilities(low: UInt8(dev), high: UInt8(dev >> 8)))
+            }){
+
+            let dev = UInt8(deviceType)
+            let sample = sampleRate ?? 0 // use 0 if no sampleRate is applicable
+            values.append(.deviceCapabilities(low: dev, high: sample))
         }
 		if let tempHigh = tempHigh, let tempLow = tempLow {
 			values.append(contentsOf: [.temperatureThreshold(low: Int16(tempLow * 10), high: Int16(tempHigh * 10))])
