@@ -24,7 +24,7 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
         obs.firmware = r.fwVersion
         obs.wifiFirmware = r.wifiVersion
         obs.battery = r.battery
-        obs.temp = r.temperature
+        obs.temp = min(r.temperature, r.rhtemp)
         obs.light = r.light
         obs.humidity = r.humidity
         obs.accelx = r.accelx
