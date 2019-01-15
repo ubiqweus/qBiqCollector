@@ -328,11 +328,16 @@ public struct BiqReportV2 {
     guard let q = qreport else {
       throw Exception.InvalidEncoding
     }
-    let offset = Int(time(nil)) - q.clock;
+    let now = Int(time(nil))
+    let offset = now - q.clock;
     var reports: [BiqReportV2] = q.records.map { r -> BiqReportV2 in
-        BiqReportV2
+      var tm = offset + Int(r.clk)
+      if tm > now {
+        tm = now
+      }
+      return BiqReportV2
             .init(delegate: false, bixid: q.id,
-                  timestamp: Double(offset + Int(r.clk)) * 1000,
+                  timestamp: Double(tm) * 1000,
                   charging: r.bat < 0 ? 1 : 0,
                   fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
                   temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
