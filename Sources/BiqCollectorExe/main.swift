@@ -68,6 +68,8 @@ let biqRedisInfo: CloudFormation.ElastiCacheInstance = {
 				 hostPort: Int("BIQ_RD_PORT".env("6379")) ?? 6379)
 }()
 CRUDLogging.queryLogDestinations = []
+CRUDLogging.errorLogDestinations = [.console, .file("/var/log/qbiq_error.log")]
+
 BiqObs.reportSink = biqRedisInfo
 BiqObs.databaseInfo = biqDatabaseInfo
 
@@ -147,9 +149,6 @@ do {
 	var r = Routes()
 	r.add(method: .get, uri: "/**", handler: fileServe)
 	r.add(method: .head, uri: "/**", handler: fileServe)
-  try HTTPServer.launch(wait: false,
-                        .secureServer(TLSConfiguration(certPath: cert, keyPath: keyp),
-                        name: "qbiq static files with security feature", port: staticFilePortTLS, routes: r))
   try HTTPServer.launch(wait: false, name: "qbiq static files", port: staticFilePort, routes: r)
 } catch {
 	CRUDLogging.log(.error, "Unable to start static file server: \(error)")
