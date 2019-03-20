@@ -120,8 +120,11 @@ extension BiqObs {
 				tempLow = limit.limitValue
 				return nil
 			case BiqDeviceLimitType.movementLevel.rawValue:
-				let value = UInt16(limit.limitValue)
-				return .accelerometerThreshold(x: value, y: value, z: value)
+				let strValue = limit.limitValueString ?? "0000,0000,0000"
+				let value: [UInt16] = strValue.split(separator: ",")
+					.map { String($0) }.map { UInt16($0, radix: 16) ?? 0}
+				CRUDLogging.log(.info, "Parsed Motional Settings \(strValue) \(value)")
+				return .accelerometerThreshold(x: value[0], y: value[1], z: value[2])
 			case BiqDeviceLimitType.colour.rawValue:
 				guard let colour = Int(limit.limitValueString ?? "4C96FC", radix: 16) else {
 					return nil
@@ -135,7 +138,7 @@ extension BiqObs {
         sampleRate = UInt8(limit.limitValue)
         return nil
       case BiqDeviceLimitType.reportFormat.rawValue:
-        return .reportFormat(1)
+        return .reportFormat(UInt8(limit.limitValue))
 			default:
 				return nil
 			}
