@@ -15,6 +15,7 @@ import Glibc
 
 public let biqProtoVersion: UInt8 = 1
 public let biqProtoVersion2: UInt8 = 2
+public let biqProtoVersion3: UInt8 = 3
 
 let biqProtoReadTimeout = 60.0
 let commaByte: UInt8 = 0x2c
@@ -441,6 +442,18 @@ extension BiqResponse: BytesProvider {
 		let responseBytes: [UInt8] = UInt16(payloadCount).bytes + [biqProtoVersion, 0] + payloads
 		return responseBytes
 	}
+
+	func crcCalc() throws -> UInt16 {
+		var crc = UInt16(0)
+		for byte in try bytes() {
+			crc = (crc >> 8) | (crc << 8);
+			crc ^= UInt16(byte);
+			crc ^= (crc & 0xff) >> 4;
+			crc ^= crc << 12;
+			crc ^= (crc & 0xff) << 5;
+		}
+		return crc
+	}
 }
 
 extension BiqResponse: Equatable {
@@ -564,6 +577,11 @@ public extension BiqProtoConnection {
 	}
 }
 
+public struct BiqReportWithVersion {
+	public let report: BiqReportV2
+	public let version: UInt8
+}
+
 // as server funcs
 public extension BiqProtoConnection {
 	// will close the connection after sending reply package
@@ -607,7 +625,7 @@ public extension BiqProtoConnection {
 			let payloadLength = Int(UInt16(first: bytes[0], second: bytes[1])) - 4
 			let protocolVersion = bytes[2]
 			
-			guard [biqProtoVersion, biqProtoVersion2].contains(protocolVersion) else {
+			guard [biqProtoVersion, biqProtoVersion2, biqProtoVersion3].contains(protocolVersion) else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unhandled protocol version \(protocolVersion).")}) }
 			}
 			
@@ -628,11 +646,14 @@ public extension BiqProtoConnection {
 			guard let bytes = bytes, bytes.count == payloadLength else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unable to read report payload.")}) }
 			}
-      if protocolVersion == biqProtoVersion2 {
+      if protocolVersion == biqProtoVersion2 || protocolVersion == biqProtoVersion3 {
           do {
             let reports = try BiqReportV2.parseReports(bytes: bytes)
             reports.forEach { report in
-              callback { return report }
+              callback {
+								let rpt = BiqReportWithVersion.init(report: report, version: protocolVersion)
+								return rpt
+							}
             }
           } catch let err {
             callback { throw err }

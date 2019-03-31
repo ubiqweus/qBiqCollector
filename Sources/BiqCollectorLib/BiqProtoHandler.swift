@@ -8,15 +8,49 @@
 import Foundation
 import PerfectCRUD
 import Dispatch
+#if os(Linux)
+import SwiftGlibc
+#endif
+
+import BiqNetLib
+
+public func readFeedBack(_ connection: BiqProtoConnection) -> UInt16? {
+	let fd = connection.net.fd.fd
+	guard fd > 0 else {
+		CRUDLogging.log(.info, "Bad file descriptor")
+		return nil
+	}
+	guard let pointer = malloc(2) else {
+		CRUDLogging.log(.info, "Unable to allocate bytes")
+		return nil
+	}
+	defer {
+		free(pointer)
+	}
+	CRUDLogging.log(.info, "Server is pending feedback")
+	let result = receive_from(fd, 2, pointer, 2)
+	guard result > 0 else {
+		CRUDLogging.log(.error, "feedback failure: \(result)")
+		return nil
+	}
+	let feedback = pointer.assumingMemoryBound(to: UInt16.self).pointee
+	CRUDLogging.log(.info, "feedback: \(feedback)")
+	return feedback
+}
+
 
 public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
+
 	connection.readReport {
 		response in
 		do {
       var obs = BiqObs()
       var shouldRespond = true
-      if let r = try response() as? BiqReportV2 {
-        CRUDLogging.log(.info, "ReportV2 read: \(r)")
+			var shouldWaitForFeedback = false
+      if let rpt = try response() as? BiqReportWithVersion {
+				let r = rpt.report
+				shouldWaitForFeedback = rpt.version > biqProtoVersion2
+				CRUDLogging.log(.info, "ReportV2 read: \(r), version: \(rpt.version)")
         shouldRespond = r.delegate
         obs.bixid = r.bixid
         obs.obstime = r.timestamp
@@ -67,7 +101,7 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 			let response: BiqResponse
 			do {
 				let status = noError
-				let responseValues = try obs.save(shouldRespond)
+				let responseValues = try obs.save(shouldRespond, removePushLimits: !shouldWaitForFeedback)
                 // in batch mode, only the last record should broadcast
                 guard shouldRespond else { return }
 				DispatchQueue.global().async { obs.reportSave() }
@@ -76,11 +110,15 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 				CRUDLogging.log(.error, "Failure while saving obs data \(error). retryReportError")
 				response = BiqResponse(version: biqProtoVersion, status: retryReportError, values: [])
 			}
-
+			let crcCode = try? response.crcCalc()
 			connection.writeResponse(response) {
 				response in
 				do {
 					try response()
+					if shouldWaitForFeedback, let crc = crcCode, let fb = readFeedBack(connection), fb == crc {
+						CRUDLogging.log(.info, "CRC matched, pushing done.")
+						try? obs.cleanup()
+					}
 				} catch {
 					CRUDLogging.log(.error, "\(error)")
 				}

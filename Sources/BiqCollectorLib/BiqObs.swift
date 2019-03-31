@@ -72,8 +72,26 @@ extension BiqObs {
 			"accelz":accelz
 		]
 	}
+
+	func cleanup () throws {
+		guard let dbInfo = BiqObs.databaseInfo else {
+			throw PostgresCRUDError("Database info not set.")
+		}
+		let db = try Database<PostgresDatabaseConfiguration>(
+			configuration: .init(database: "biq",
+													 host: dbInfo.hostName,
+													 port: dbInfo.hostPort,
+													 username: dbInfo.userName,
+													 password: dbInfo.password))
+
+		try db.transaction {
+			let table = db.table(BiqDevicePushLimit.self)
+			let whereClause = table.where(\BiqDevicePushLimit.deviceId == bixid)
+			try whereClause.delete()
+		}
+	}
 	
-	func save(_ delegate: Bool = true) throws -> [BiqResponseValue] {
+	func save(_ delegate: Bool = true, removePushLimits: Bool = true) throws -> [BiqResponseValue] {
 		guard let dbInfo = BiqObs.databaseInfo else {
 			throw PostgresCRUDError("Database info not set.")
 		}
@@ -98,7 +116,7 @@ extension BiqObs {
 			let table = db.table(BiqDevicePushLimit.self)
 			let whereClause = table.where(\BiqDevicePushLimit.deviceId == bixid)
 			let all = try whereClause.select().map {$0}
-			if !all.isEmpty {
+			if !all.isEmpty && removePushLimits {
 				try whereClause.delete()
 			}
 			return all

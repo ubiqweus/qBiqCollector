@@ -20,6 +20,7 @@ let package = Package(
 		.package(url: "https://github.com/ubiqweus/qBiqSwiftCodables.git", .branch("master"))
 	],
 	targets: [
+		.target(name: "BiqNetLib", dependencies:[]),
 		.target(name: "BiqCollectorLib",
 				dependencies: [
 					"PerfectNet",
@@ -27,7 +28,8 @@ let package = Package(
 					"PerfectLib",
 					"PerfectPostgreSQL",
 					"PerfectRedis",
-					"SwiftCodables"
+					"SwiftCodables",
+					"BiqNetLib"
 			]
 		),
 		.target(name: "BiqCollectorExe",
