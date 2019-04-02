@@ -90,7 +90,21 @@ extension BiqObs {
 			try whereClause.delete()
 		}
 	}
-	
+
+	func getLimitPercentagePair(value: Float) -> (UInt8, UInt8){
+		let ushort = UInt16(value)
+		var upper = UInt8((ushort & 0xFF00) >> 8)
+		var lower = UInt8(ushort & 0x00FF)
+		if lower > 100 { lower = 100 }
+		if upper > 100 { upper = 100 }
+		if lower > upper {
+			let mid = upper
+			upper = lower
+			lower = mid
+		}
+		return (lower, upper)
+	}
+
 	func save(_ delegate: Bool = true, removePushLimits: Bool = true) throws -> [BiqResponseValue] {
 		guard let dbInfo = BiqObs.databaseInfo else {
 			throw PostgresCRUDError("Database info not set.")
@@ -137,6 +151,12 @@ extension BiqObs {
 			case BiqDeviceLimitType.tempLow.rawValue:
 				tempLow = limit.limitValue
 				return nil
+			case BiqDeviceLimitType.humidityLevel.rawValue:
+				let pair = getLimitPercentagePair(value: limit.limitValue)
+				return .humidityThreshold(low: pair.0, high: pair.1)
+			case BiqDeviceLimitType.lightLevel.rawValue:
+				let pair = getLimitPercentagePair(value: limit.limitValue)
+				return .lightThreshold(low: pair.0, high: pair.1)
 			case BiqDeviceLimitType.movementLevel.rawValue:
 				let strValue = limit.limitValueString ?? "0000,0000,0000"
 				let value: [UInt16] = strValue.split(separator: ",")
