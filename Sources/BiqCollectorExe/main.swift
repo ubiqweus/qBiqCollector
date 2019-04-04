@@ -26,7 +26,6 @@ import PerfectHTTPServer
 import PerfectNet
 import PerfectCrypto
 import PerfectCloudFormation
-import PerfectRedis
 import PerfectCRUD
 import SwiftCodables
 
@@ -56,25 +55,12 @@ let biqDatabaseInfo: CloudFormation.RDSInstance = {
 				 hostPort: Int("BIQ_PG_PORT".env("5432")) ?? 5432 )
 }()
 
-let biqRedisInfo: CloudFormation.ElastiCacheInstance = {
-	if let redis = CloudFormation.listElastiCacheInstances(type: .redis)
-		.sorted(by: { $0.resourceName < $1.resourceName }).first {
-		return redis
-	}
-	return .init(resourceType: .redis,
-				 resourceId: "",
-				 resourceName: "",
-				 hostName: "BIQ_RD_HOST".env("localhost"),
-				 hostPort: Int("BIQ_RD_PORT".env("6379")) ?? 6379)
-}()
 CRUDLogging.queryLogDestinations = []
 CRUDLogging.errorLogDestinations = [.console, .file("/var/log/qbiq_error.log")]
 
-BiqObs.reportSink = biqRedisInfo
 BiqObs.databaseInfo = biqDatabaseInfo
 
 let staticFilePort = 80
-let staticFilePortTLS = 443
 let testPort = 8080
 #if os(Linux)
 let webroot = "./webroot"
@@ -83,11 +69,13 @@ let webroot = "./webroot"
 let webroot = "/Users/rockywei/qbiq/release"
 #endif
 
-let cert = "BIQ_SV_CERT".env("/etc/cert/combo.crt")
-let keyp = "BIQ_SV_KEYP".env("/etc/cert/harvest.key")
+let notificationConfigPath = "BIQ_NT_PATH".env("/root/conf.prod.json")
+let notificationKeyPath = "BIQ_NT_KEY".env("/root/secret.key")
 
 // static file server for updates
 do {
+	CRUDLogging.log(.info, "Setup notifications on \(notificationConfigPath) with \(notificationKeyPath)")
+	try BiqCollectorLib.Config.setup(configurationFilePath: notificationConfigPath, keyPath: notificationKeyPath)
 	CRUDLogging.log(.info, "Binding static file server on port \(staticFilePort)")
 	func fileServe(_ request: HTTPRequest, _ response: HTTPResponse) {
 		let path = request.path

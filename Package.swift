@@ -15,9 +15,10 @@ let package = Package(
 		.package(url: "https://github.com/PerfectlySoft/PerfectLib.git", from: "3.0.0"),
 		.package(url: "https://github.com/PerfectlySoft/Perfect-PostgreSQL.git", from: "3.0.0"),
 		.package(url: "https://github.com/PerfectlySoft/Perfect-HTTPServer", from: "3.0.0"),
+		.package(url: "https://github.com/PerfectlySoft/Perfect-Notifications.git", from: "3.0.0"),
 		.package(url: "https://github.com/PerfectlySoft/Perfect-CloudFormation.git", from: "0.0.0"),
-		.package(url: "https://github.com/PerfectlySoft/Perfect-Redis.git", from: "3.2.0"),
-		.package(url: "https://github.com/ubiqweus/qBiqSwiftCodables.git", .branch("master"))
+		.package(url: "https://github.com/ubiqweus/qBiqSwiftCodables.git", .branch("master")),
+		.package(url: "https://github.com/kjessup/SAuthCodables.git", .branch("master")),
 	],
 	targets: [
 		.target(name: "BiqNetLib", dependencies:[]),
@@ -27,8 +28,9 @@ let package = Package(
 					"PerfectThread",
 					"PerfectLib",
 					"PerfectPostgreSQL",
-					"PerfectRedis",
+          "PerfectNotifications",
 					"SwiftCodables",
+					"SAuthCodables",
 					"BiqNetLib"
 			]
 		),

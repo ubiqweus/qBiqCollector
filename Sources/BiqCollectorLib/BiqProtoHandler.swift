@@ -104,7 +104,7 @@ public func handleBiqProtoConnection(_ connection: BiqProtoConnection) {
 				let responseValues = try obs.save(shouldRespond, removePushLimits: !shouldWaitForFeedback)
                 // in batch mode, only the last record should broadcast
                 guard shouldRespond else { return }
-				DispatchQueue.global().async { obs.reportSave() }
+				DispatchQueue.global().async { try? obs.reportSave() }
 				response = BiqResponse(version: biqProtoVersion, status: status, values: responseValues)
 			} catch {
 				CRUDLogging.log(.error, "Failure while saving obs data \(error). retryReportError")
