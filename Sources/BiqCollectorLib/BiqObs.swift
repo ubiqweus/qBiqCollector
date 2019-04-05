@@ -247,20 +247,24 @@ extension BiqObs {
 extension BiqObs {
 
 	enum NoteType {
-		case checkIn
+		case battery
 		case motion
 		case temperature(Double, Bool)
 		case humidity(Int)
 		case brightness(Int)
 	}
 
-	private func isObsMoved() -> Bool {
+	private var movements: Int {
 		let counter = accelx & 0xFFFF
 		let xy = accely
 		let z = accelz & 0xFFFF
-		let moved = xy != 0 || z != 0
-		CRUDLogging.log(.info, "motional data: \(counter), \(xy), \(z), \(moved), conclusion: \(counter > 0 && moved)")
-		return counter > 0 && moved
+		return xy == 0 && z == 0 ? 0 : counter
+	}
+
+	private func isObsMoved() -> Bool {
+		let moved = movements > 0
+		CRUDLogging.log(.info, "motional data: \(accelx), \(accely), \(accelz), \(movements), conclusion: \(moved)")
+		return moved
 	}
 
 	private func getThresholds(value: Float) -> (low:Int, high:Int) {
@@ -275,6 +279,10 @@ extension BiqObs {
 			low = mid
 		}
 		return (low: low, high: high)
+	}
+
+	private func isObsLowBattery() -> Bool {
+		return battery < 3.2
 	}
 
 	private func isObsOverHumid(limits: [BiqDeviceLimit] = []) -> Bool {
@@ -311,9 +319,9 @@ extension BiqObs {
 		return temp < Double(low.0) || temp > Double(high.0)
 	}
 
-	private func getNoteType() throws -> NoteType? {
+	private func getNoteType() throws -> [NoteType] {
 		guard let dbInfo = BiqObs.databaseInfo else {
-			return nil
+			return []
 		}
 		let db = try Database<PostgresDatabaseConfiguration>(
 			configuration: .init(database: "qbiq_devices2",
@@ -322,14 +330,16 @@ extension BiqObs {
 													 username: dbInfo.userName,
 													 password: dbInfo.password))
 		guard let device = try db.table(BiqDevice.self).where(\BiqDevice.id == bixid).first(),
-			let owner = device.ownerId else { return nil }
+			let owner = device.ownerId else { return [] }
 		let limits:[BiqDeviceLimit] = try db.table(BiqDeviceLimit.self)
 			.where(\BiqDeviceLimit.deviceId == bixid && \BiqDeviceLimit.userId == owner)
 			.select().map { $0 }
 		CRUDLogging.log(.info, "note type inspecting: \(limits.count) threshold found for owner \(owner.uuidString)")
-		if isObsMoved() { return .motion }
-		if isObsOverBright(limits: limits) { return .brightness(light) }
-		if isObsOverHumid(limits: limits) { return .humidity(humidity) }
+		var notes: [NoteType] = []
+		if isObsLowBattery() { notes += [.battery]}
+		if isObsMoved() { notes += [.motion] }
+		if isObsOverBright(limits: limits) { notes += [.brightness(light)] }
+		if isObsOverHumid(limits: limits) { notes += [.humidity(humidity)] }
 		if isObsOverTemperature(limits: limits) {
 			let lim: [(Float, BiqDeviceLimitType)] = limits.map { limitaion -> (Float, BiqDeviceLimitType) in
 				return (limitaion.limitValue, BiqDeviceLimitType.init(rawValue: limitaion.limitType))
@@ -341,14 +351,14 @@ extension BiqObs {
 			} else {
 				farhrenheit = false
 			}
-			return .temperature(temp, farhrenheit)
+			notes += [.temperature(temp, farhrenheit)]
 		}
-		return .checkIn
+		return notes
 	}
 
-	private func sendBiqNotification(config: Config.Notifications, userDevices: [String], title: String,
-																	 biqName: String, deviceId: String, biqColour: String,
-																	 batteryLevel: Double, charging: Bool, isOwner: Bool,
+	private func sendBiqNotification(config: Config.Notifications, userDevices: [String],
+																	 title: String, notes: String,
+																	 biqName: String, biqColour: String, isOwner: Bool,
 																	 formattedValue: String, alertMessage: String) {
 		let promise: Promise<Bool> = Promise {
 			p in
@@ -357,15 +367,20 @@ extension BiqObs {
 				deviceTokens: userDevices,
 				notificationItems: [
 					.customPayload("qbiq.name", biqName),
-					.customPayload("qbiq.id",deviceId),
+					.customPayload("qbiq.id", self.bixid),
 					.customPayload("qbiq.colour", biqColour),
-					.customPayload("qbiq.battery", batteryLevel),
-					.customPayload("qbiq.charging", charging),
+					.customPayload("qbiq.battery", self.battery),
+					.customPayload("qbiq.charging", self.charging),
+					.customPayload("qbiq.temperature", self.temp),
+					.customPayload("qbiq.humidity", self.humidity),
+					.customPayload("qbiq.brightness", self.light),
+					.customPayload("qbiq.movement", self.movements),
 					.customPayload("qbiq.shared", !isOwner),
+					.customPayload("qbiq.notes", notes),
 					.customPayload("qbiq.value", formattedValue),
 					.mutableContent,
 					.category("qbiq.alert"),
-					.threadId(deviceId),
+					.threadId(self.bixid),
 					.alertTitle(title),
 					.alertBody(alertMessage)]) {
 						responses in
@@ -390,7 +405,7 @@ extension BiqObs {
 
 	func reportSave() throws {
 
-		guard let dbInfo = BiqObs.databaseInfo, let noteType = try getNoteType(), let note = Config.configuration?.notifications else {
+		guard let dbInfo = BiqObs.databaseInfo, let note = Config.configuration?.notifications else {
 			CRUDLogging.log(.error, "note type is invalid")
 			return
 		}
@@ -413,29 +428,48 @@ extension BiqObs {
 		}
 
 		CRUDLogging.log(.info, "device name = \(biqName)")
-		let title: String
-		let alert: String
-		switch noteType {
-		case .temperature(let temp, let farhrenheit):
-			let tempScale = farhrenheit ? TemperatureScale.fahrenheit : TemperatureScale.celsius
-			let tempString = tempScale.formatC(temp)
-			title = "Temperature Alert"
-			alert = "\(biqName): temperature is reaching \(tempString)"
-		case .humidity(let humidity):
-			title = "Humidity Alert"
-			alert = "\(biqName): humidity is reaching \(humidity)%"
-		case .brightness(let lightLevel):
-			title = "Brightness Alert"
-			alert = "\(biqName): light level is reaching \(lightLevel)%"
-		case .motion:
-			title = "Movement Alert"
-			alert = "\(biqName) has been moved over \(accelx & 0xFFFF) times"
-		default:
-			// ignore check-in
-			CRUDLogging.log(.info, "ignore regular check-in")
-			return
+		let noteType = try getNoteType()
+
+		let notes = noteType.map { n -> (String, String) in
+			let title: String
+			let alert: String
+			switch n {
+			case .temperature(let temp, let farhrenheit):
+				let tempScale = farhrenheit ? TemperatureScale.fahrenheit : TemperatureScale.celsius
+				let tempString = tempScale.formatC(temp)
+				title = "Temperature"
+				alert = "temperature is reaching \(tempString)"
+			case .humidity(let humidity):
+				title = "Humidity"
+				alert = "humidity is reaching \(humidity)%"
+			case .brightness(let lightLevel):
+				title = "Brightness"
+				alert = "light level is reaching \(lightLevel)%"
+			case .motion:
+				title = "Movement"
+				alert = "has been moved over \(accelx & 0xFFFF) times"
+			case .battery:
+				title = "Battery"
+				alert = "battery is low"
+			}
+			return (title, alert)
 		}
 
+		// skip check in
+		guard !notes.isEmpty else { return }
+
+		let title: String
+		let alert: String
+		let types: String
+		if notes.count < 2, let only = notes.first {
+			types = only.0
+			title = "\(types) Alert"
+			alert = "\(biqName) \(only.1)"
+		} else {
+			types = notes.map { $0.0 }.joined(separator: ", ")
+			title = "Alert: " + types
+			alert = "\(biqName) has multiple alerts: \n" + (notes.map { "- \($0.1)" }.joined(separator: "\n"))
+		}
 		let adb = try Database<PostgresDatabaseConfiguration>(
 			configuration: .init(database: "qbiq_user_auth2",
 													 host: dbInfo.hostName,
@@ -487,9 +521,11 @@ extension BiqObs {
 				}
 
 				let isOwner = device.ownerId == limit.userId
-				self.sendBiqNotification(config: note, userDevices: userDevices, title: title, biqName: biqName, deviceId: deviceId, biqColour: biqColour,
-																 batteryLevel: battery, charging: charging != 0, isOwner: isOwner,
-																 formattedValue: "\(humidity)%", alertMessage: alert)
+				self.sendBiqNotification(config: note, userDevices: userDevices,
+																 title: title, notes:types,
+																 biqName: biqName, biqColour: biqColour,
+																 isOwner: isOwner,
+																 formattedValue: "\(temp)°C", alertMessage: alert)
 			}
 		}
 		CRUDLogging.log(.info, "notification completed")
