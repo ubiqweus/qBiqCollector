@@ -326,21 +326,29 @@ public struct BiqReportV2 {
       return (clock: clock, records: records, id: contents[0], efm: contents[1], esp: contents[2])
     }
 
-    guard let q = qreport else {
-      throw Exception.InvalidEncoding
-    }
+    guard let q = qreport, (q.id.count > 9 && q.id.count < 21) && q.efm.count == 13 && q.esp.count == 12 else {
+			throw Exception.InvalidEncoding
+		}
     let now = Int(time(nil))
     let offset = now - q.clock;
-    var reports: [BiqReportV2] = q.records.map { r -> BiqReportV2 in
+    var reports: [BiqReportV2] = q.records.compactMap { r -> BiqReportV2? in
       var tm = offset + Int(r.clk)
       if tm > now {
         tm = now
       }
+			let batt = Double(abs(r.bat)) / 100.0
+			guard
+				(batt < 5 && batt > 1),
+				(r.tmp > -500 && r.tmp < 1000),
+				(r.rht > -500 && r.rht < 1000),
+				(r.hum >= 0 && r.hum <= 100),
+				(r.lum >= 0 && r.lum <= 100)
+				else { return nil }
       return BiqReportV2
             .init(delegate: false, bixid: q.id,
                   timestamp: Double(tm) * 1000,
                   charging: r.bat < 0 ? 1 : 0,
-                  fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
+                  fwVersion: q.efm, wifiVersion: q.esp, battery: batt,
                   temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
                   humidity: Int(r.hum), light: Int(r.lum),
                   accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
