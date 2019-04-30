@@ -15,6 +15,7 @@ import Glibc
 
 public let biqProtoVersion: UInt8 = 1
 public let biqProtoVersion2: UInt8 = 2
+public let biqProtoVersion3: UInt8 = 3
 
 let biqProtoReadTimeout = 60.0
 let commaByte: UInt8 = 0x2c
@@ -325,16 +326,29 @@ public struct BiqReportV2 {
       return (clock: clock, records: records, id: contents[0], efm: contents[1], esp: contents[2])
     }
 
-    guard let q = qreport else {
-      throw Exception.InvalidEncoding
-    }
-    let offset = Int(time(nil)) - q.clock;
-    var reports: [BiqReportV2] = q.records.map { r -> BiqReportV2 in
-        BiqReportV2
+    guard let q = qreport, (q.id.count > 9 && q.id.count < 21) && q.efm.count == 13 && q.esp.count == 12 else {
+			throw Exception.InvalidEncoding
+		}
+    let now = Int(time(nil))
+    let offset = now - q.clock;
+    var reports: [BiqReportV2] = q.records.compactMap { r -> BiqReportV2? in
+      var tm = offset + Int(r.clk)
+      if tm > now {
+        tm = now
+      }
+			let batt = Double(abs(r.bat)) / 100.0
+			guard
+				(batt < 5 && batt > 1),
+				(r.tmp > -500 && r.tmp < 1000),
+				(r.rht > -500 && r.rht < 1000),
+				(r.hum >= 0 && r.hum <= 100),
+				(r.lum >= 0 && r.lum <= 100)
+				else { return nil }
+      return BiqReportV2
             .init(delegate: false, bixid: q.id,
-                  timestamp: Double(offset + Int(r.clk)) * 1000,
+                  timestamp: Double(tm) * 1000,
                   charging: r.bat < 0 ? 1 : 0,
-                  fwVersion: q.efm, wifiVersion: q.esp, battery: Double(abs(r.bat)) / 100.0,
+                  fwVersion: q.efm, wifiVersion: q.esp, battery: batt,
                   temperature: Double(r.tmp) / 10.0, rhtemp: Double(r.rht) / 10.0,
                   humidity: Int(r.hum), light: Int(r.lum),
                   accelx: Int(r.x), accely: Int(r.y), accelz: Int(r.z))
@@ -435,6 +449,18 @@ extension BiqResponse: BytesProvider {
 		}
 		let responseBytes: [UInt8] = UInt16(payloadCount).bytes + [biqProtoVersion, 0] + payloads
 		return responseBytes
+	}
+
+	func crcCalc() throws -> UInt16 {
+		var crc = UInt16(0)
+		for byte in try bytes() {
+			crc = (crc >> 8) | (crc << 8);
+			crc ^= UInt16(byte);
+			crc ^= (crc & 0xff) >> 4;
+			crc ^= crc << 12;
+			crc ^= (crc & 0xff) << 5;
+		}
+		return crc
 	}
 }
 
@@ -559,6 +585,11 @@ public extension BiqProtoConnection {
 	}
 }
 
+public struct BiqReportWithVersion {
+	public let report: BiqReportV2
+	public let version: UInt8
+}
+
 // as server funcs
 public extension BiqProtoConnection {
 	// will close the connection after sending reply package
@@ -602,7 +633,7 @@ public extension BiqProtoConnection {
 			let payloadLength = Int(UInt16(first: bytes[0], second: bytes[1])) - 4
 			let protocolVersion = bytes[2]
 			
-			guard [biqProtoVersion, biqProtoVersion2].contains(protocolVersion) else {
+			guard [biqProtoVersion, biqProtoVersion2, biqProtoVersion3].contains(protocolVersion) else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unhandled protocol version \(protocolVersion).")}) }
 			}
 			
@@ -623,11 +654,14 @@ public extension BiqProtoConnection {
 			guard let bytes = bytes, bytes.count == payloadLength else {
 				return self.errorReply(code: protocolError) { callback({throw BiqProtoError("Unable to read report payload.")}) }
 			}
-      if protocolVersion == biqProtoVersion2 {
+      if protocolVersion == biqProtoVersion2 || protocolVersion == biqProtoVersion3 {
           do {
             let reports = try BiqReportV2.parseReports(bytes: bytes)
             reports.forEach { report in
-              callback { return report }
+              callback {
+								let rpt = BiqReportWithVersion.init(report: report, version: protocolVersion)
+								return rpt
+							}
             }
           } catch let err {
             callback { throw err }

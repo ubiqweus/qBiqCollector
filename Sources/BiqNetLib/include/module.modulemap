@@ -1,0 +1,4 @@
+module BiqNetLib {
+    header "biqnet.h"
+    export *
+}

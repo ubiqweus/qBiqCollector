@@ -26,9 +26,20 @@ import PerfectHTTPServer
 import PerfectNet
 import PerfectCrypto
 import PerfectCloudFormation
-import PerfectRedis
 import PerfectCRUD
 import SwiftCodables
+
+extension String {
+  func env(_ defaultValue: String = "" ) -> String {
+    guard let pval = getenv(self) else { 
+	    print("loading env ", self, " = ", defaultValue)
+		return defaultValue 
+	}
+    let val = String.init(cString: pval)
+    print("loading env ", self, " = ", val)
+    return val
+  }
+}
 
 let biqDatabaseInfo: CloudFormation.RDSInstance = {
 	if let pgsql = CloudFormation.listRDSInstances(type: .postgres)
@@ -38,39 +49,33 @@ let biqDatabaseInfo: CloudFormation.RDSInstance = {
 	return .init(resourceType: .postgres,
 				 resourceId: "",
 				 resourceName: "",
-				 userName: "postgres",
-				 password: "",
-				 hostName: "localhost",
-				 hostPort: 5432)
+				 userName: "BIQ_PG_USER".env("postgres"),
+				 password: "BIQ_PG_PASS".env(""),
+				 hostName: "BIQ_PG_HOST".env("localhost"),
+				 hostPort: Int("BIQ_PG_PORT".env("5432")) ?? 5432 )
 }()
 
-let biqRedisInfo: CloudFormation.ElastiCacheInstance = {
-	if let redis = CloudFormation.listElastiCacheInstances(type: .redis)
-		.sorted(by: { $0.resourceName < $1.resourceName }).first {
-		return redis
-	}
-	return .init(resourceType: .redis,
-				 resourceId: "",
-				 resourceName: "",
-				 hostName: "localhost",
-				 hostPort: 6379)
-}()
 CRUDLogging.queryLogDestinations = []
-BiqObs.reportSink = biqRedisInfo
+CRUDLogging.errorLogDestinations = [.console, .file("/var/log/qbiq_error.log")]
+
 BiqObs.databaseInfo = biqDatabaseInfo
 
-#if os(Linux)
 let staticFilePort = 80
 let testPort = 8080
+#if os(Linux)
 let webroot = "./webroot"
 #else
-let staticFilePort = 80
-let testPort = 8080
-let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
+//let webroot = "/Users/kjessup/development/TreeFrog/qBiq/qBiqCollector/webroot"
+let webroot = "/Users/rockywei/qbiq/release"
 #endif
+
+let notificationConfigPath = "BIQ_NT_PATH".env("/root/conf.prod.json")
+let notificationKeyPath = "BIQ_NT_KEY".env("/root/secret.key")
 
 // static file server for updates
 do {
+	CRUDLogging.log(.info, "Setup notifications on \(notificationConfigPath) with \(notificationKeyPath)")
+	try BiqCollectorLib.Config.setup(configurationFilePath: notificationConfigPath, keyPath: notificationKeyPath)
 	CRUDLogging.log(.info, "Binding static file server on port \(staticFilePort)")
 	func fileServe(_ request: HTTPRequest, _ response: HTTPResponse) {
 		let path = request.path
@@ -132,7 +137,7 @@ do {
 	var r = Routes()
 	r.add(method: .get, uri: "/**", handler: fileServe)
 	r.add(method: .head, uri: "/**", handler: fileServe)
-	try HTTPServer.launch(wait: false, name: "qbiq static files", port: staticFilePort, routes: r)
+  try HTTPServer.launch(wait: false, name: "qbiq static files", port: staticFilePort, routes: r)
 } catch {
 	CRUDLogging.log(.error, "Unable to start static file server: \(error)")
 }
